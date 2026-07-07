@@ -170,6 +170,9 @@ export default function RetirementPlanner() {
   const [collapsed, setCollapsed] = useState(initialState?.collapsed ?? {
     expenses: false, income: false, allocation: false, budgetVsActual: false,
   });
+  // Autosave is ON only if we actually found saved data on load (i.e. it was left on last time).
+  // If nothing was in localStorage, default to ON so first-time users get autosave by default.
+  const [autosave, setAutosave] = useState(true);
 
   function toggleCollapse(key) {
     setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -186,8 +189,28 @@ export default function RetirementPlanner() {
     }
   };
 
-  // Save on every state change
-  useEffect(() => { saveState(); }, [corpus, expenseItems, inflation, years, incomeItems, alloc, actuals, selectedMonth, collapsed]);
+  function toggleAutosave() {
+    setAutosave((prev) => {
+      const next = !prev;
+      if (!next) {
+        // Turning autosave OFF: wipe any previously saved data
+        try {
+          localStorage.removeItem(STORAGE_KEY);
+        } catch (e) {
+          console.warn("Failed to clear localStorage:", e);
+        }
+      } else {
+        // Turning autosave ON: immediately persist current state
+        saveState();
+      }
+      return next;
+    });
+  }
+
+  // Save on every state change, but only while autosave is enabled
+  useEffect(() => {
+    if (autosave) saveState();
+  }, [corpus, expenseItems, inflation, years, incomeItems, alloc, actuals, selectedMonth, collapsed, autosave]);
 
   const monthlyExpense = expenseItems.reduce((s, e) => s + Number(e.amount || 0), 0);
   const monthlyOtherIncome = incomeItems.reduce((s, i) => s + Number(i.amount || 0), 0);
@@ -370,12 +393,28 @@ export default function RetirementPlanner() {
       `}</style>
 
       <header style={styles.header}>
-        <div style={styles.ledgerTab}>LEDGER · FY 2026-27</div>
+        <div style={styles.topRow}>
+          <div style={styles.ledgerTab}>LEDGER · FY 2026-27</div>
+          <button
+            onClick={toggleAutosave}
+            style={{ ...styles.autosaveBtn, ...(autosave ? styles.autosaveBtnOn : styles.autosaveBtnOff) }}
+            aria-pressed={autosave}
+          >
+            <span style={{ ...styles.autosaveDot, background: autosave ? "#5FA777" : "#7C93A6" }} />
+            Autosave: {autosave ? "On" : "Off"}
+          </button>
+        </div>
         <h1 style={styles.title}>Retirement Corpus Planner</h1>
         <p style={styles.subtitle}>
           Allocate the corpus across FD, SCSS, Debt & Equity MF and Gold — see the
           post-tax, inflation-adjusted drawdown play out, year by ledger year.
         </p>
+        {!autosave && (
+          <p style={styles.autosaveWarning}>
+            Autosave is off — your changes will not be saved, and any previously saved data has been cleared.
+            Turn autosave back on to persist your inputs in this browser.
+          </p>
+        )}
         <button onClick={downloadExcel} style={styles.downloadBtn}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 8 }}>
             <path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" strokeLinecap="round" strokeLinejoin="round" />
@@ -754,7 +793,13 @@ function Stat({ label, value, accent, warn }) {
 const styles = {
   page: { minHeight: "100%", background: "#12203a", color: "#F7F3E9", fontFamily: "'Inter', sans-serif", padding: "28px 24px 60px", },
   header: { maxWidth: 1100, margin: "0 auto 28px" },
-  ledgerTab: { display: "inline-block", fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.12em", color: "#C79A45", border: "1px solid #C79A45", borderRadius: 3, padding: "3px 8px", marginBottom: 12 },
+  topRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 },
+  ledgerTab: { display: "inline-block", fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.12em", color: "#C79A45", border: "1px solid #C79A45", borderRadius: 3, padding: "3px 8px" },
+  autosaveBtn: { display: "inline-flex", alignItems: "center", gap: 8, background: "transparent", border: "1px solid #3a4557", borderRadius: 20, padding: "6px 14px 6px 10px", fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, fontWeight: 600, letterSpacing: "0.02em", cursor: "pointer", transition: "border-color 0.15s ease, color 0.15s ease" },
+  autosaveBtnOn: { color: "#5FA777", borderColor: "rgba(95,167,119,0.45)" },
+  autosaveBtnOff: { color: "#7C93A6", borderColor: "#3a4557" },
+  autosaveDot: { width: 7, height: 7, borderRadius: "50%", display: "inline-block" },
+  autosaveWarning: { fontSize: 12.5, color: "#E0A088", background: "rgba(193,89,75,0.12)", border: "1px solid rgba(193,89,75,0.35)", borderRadius: 6, padding: "8px 12px", marginTop: 14, maxWidth: 620, lineHeight: 1.5 },
   title: { fontFamily: "'Source Serif 4', serif", fontSize: 34, fontWeight: 600, margin: "0 0 8px", letterSpacing: "-0.01em" },
   subtitle: { color: "#9FB0C7", fontSize: 15, maxWidth: 620, lineHeight: 1.5, margin: 0 },
   downloadBtn: { display: "inline-flex", alignItems: "center", marginTop: 18, background: "#C79A45", color: "#12203a", border: "none", borderRadius: 6, padding: "10px 18px", fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, fontWeight: 600, letterSpacing: "0.02em", cursor: "pointer" },
