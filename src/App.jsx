@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   AreaChart, Area, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Legend, BarChart, Bar, LineChart, Line
@@ -145,14 +145,49 @@ const DEFAULT_INCOME = [
 ];
 
 export default function RetirementPlanner() {
-  const [corpus, setCorpus] = useState(30000000); // 3 Cr
-  const [expenseItems, setExpenseItems] = useState(DEFAULT_EXPENSES);
-  const [inflation, setInflation] = useState(6);
-  const [years, setYears] = useState(30);
-  const [incomeItems, setIncomeItems] = useState(DEFAULT_INCOME);
-  const [alloc, setAlloc] = useState(DEFAULT_ALLOC);
-  const [actuals, setActuals] = useState({}); // { monthIndex: { categoryId: amount } }
-  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+  const STORAGE_KEY = "retirement-planner-state";
+
+  // Load from localStorage or use defaults
+  const loadState = () => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const initialState = loadState();
+
+  const [corpus, setCorpus] = useState(initialState?.corpus ?? 30000000);
+  const [expenseItems, setExpenseItems] = useState(initialState?.expenseItems ?? DEFAULT_EXPENSES);
+  const [inflation, setInflation] = useState(initialState?.inflation ?? 6);
+  const [years, setYears] = useState(initialState?.years ?? 30);
+  const [incomeItems, setIncomeItems] = useState(initialState?.incomeItems ?? DEFAULT_INCOME);
+  const [alloc, setAlloc] = useState(initialState?.alloc ?? DEFAULT_ALLOC);
+  const [actuals, setActuals] = useState(initialState?.actuals ?? {});
+  const [selectedMonth, setSelectedMonth] = useState(initialState?.selectedMonth ?? new Date().getMonth());
+  const [collapsed, setCollapsed] = useState(initialState?.collapsed ?? {
+    expenses: false, income: false, allocation: false, budgetVsActual: false,
+  });
+
+  function toggleCollapse(key) {
+    setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
+
+  // Save to localStorage whenever any state changes
+  const saveState = () => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        corpus, expenseItems, inflation, years, incomeItems, alloc, actuals, selectedMonth, collapsed,
+      }));
+    } catch (e) {
+      console.warn("Failed to save to localStorage:", e);
+    }
+  };
+
+  // Save on every state change
+  useEffect(() => { saveState(); }, [corpus, expenseItems, inflation, years, incomeItems, alloc, actuals, selectedMonth, collapsed]);
 
   const monthlyExpense = expenseItems.reduce((s, e) => s + Number(e.amount || 0), 0);
   const monthlyOtherIncome = incomeItems.reduce((s, i) => s + Number(i.amount || 0), 0);
@@ -347,6 +382,17 @@ export default function RetirementPlanner() {
           </svg>
           Download as Excel
         </button>
+        <button
+          onClick={() => {
+            if (window.confirm("Reset all data to defaults? This cannot be undone.")) {
+              localStorage.removeItem(STORAGE_KEY);
+              window.location.reload();
+            }
+          }}
+          style={styles.resetBtn}
+        >
+          Reset to defaults
+        </button>
       </header>
 
       <div style={styles.grid}>
@@ -360,58 +406,80 @@ export default function RetirementPlanner() {
 
           <div style={styles.divider} />
           <div style={styles.expenseHeaderRow}>
-            <h2 style={{ ...styles.cardTitle, margin: 0 }}>02 · Monthly Household Expenses</h2>
+            <div style={styles.sectionTitleRow} onClick={() => toggleCollapse("expenses")}>
+              <CollapseChevron collapsed={collapsed.expenses} />
+              <h2 style={{ ...styles.cardTitle, margin: 0 }}>02 · Monthly Household Expenses</h2>
+            </div>
             <span style={styles.expenseTotal}>{inr(monthlyExpense)}/mo</span>
           </div>
 
-          {expenseItems.map((e) => (
-            <ExpenseRow
-              key={e.id}
-              label={e.label}
-              amount={e.amount}
-              onLabel={(v) => updateExpense(e.id, "label", v)}
-              onAmount={(v) => updateExpense(e.id, "amount", v)}
-              onRemove={() => removeExpense(e.id)}
-            />
-          ))}
-          <button onClick={addExpense} style={styles.addExpenseBtn}>+ Add expense line</button>
+          {!collapsed.expenses && (
+            <>
+              {expenseItems.map((e) => (
+                <ExpenseRow
+                  key={e.id}
+                  label={e.label}
+                  amount={e.amount}
+                  onLabel={(v) => updateExpense(e.id, "label", v)}
+                  onAmount={(v) => updateExpense(e.id, "amount", v)}
+                  onRemove={() => removeExpense(e.id)}
+                />
+              ))}
+              <button onClick={addExpense} style={styles.addExpenseBtn}>+ Add expense line</button>
+            </>
+          )}
 
           <div style={styles.divider} />
           <div style={styles.expenseHeaderRow}>
-            <h2 style={{ ...styles.cardTitle, margin: 0 }}>03 · Other Monthly Income</h2>
+            <div style={styles.sectionTitleRow} onClick={() => toggleCollapse("income")}>
+              <CollapseChevron collapsed={collapsed.income} />
+              <h2 style={{ ...styles.cardTitle, margin: 0 }}>03 · Other Monthly Income</h2>
+            </div>
             <span style={styles.expenseTotal}>{inr(monthlyOtherIncome)}/mo</span>
           </div>
-          <p style={styles.helperText}>Pension, rental income, annuity payouts, part-time consulting, etc.</p>
 
-          {incomeItems.map((i) => (
-            <ExpenseRow
-              key={i.id}
-              label={i.label}
-              amount={i.amount}
-              onLabel={(v) => updateIncome(i.id, "label", v)}
-              onAmount={(v) => updateIncome(i.id, "amount", v)}
-              onRemove={() => removeIncome(i.id)}
-            />
-          ))}
-          <button onClick={addIncome} style={styles.addExpenseBtn}>+ Add income source</button>
+          {!collapsed.income && (
+            <>
+              <p style={styles.helperText}>Pension, rental income, annuity payouts, part-time consulting, etc.</p>
+              {incomeItems.map((i) => (
+                <ExpenseRow
+                  key={i.id}
+                  label={i.label}
+                  amount={i.amount}
+                  onLabel={(v) => updateIncome(i.id, "label", v)}
+                  onAmount={(v) => updateIncome(i.id, "amount", v)}
+                  onRemove={() => removeIncome(i.id)}
+                />
+              ))}
+              <button onClick={addIncome} style={styles.addExpenseBtn}>+ Add income source</button>
+            </>
+          )}
 
           <div style={styles.divider} />
-          <h2 style={styles.cardTitle}>04 · The Allocation</h2>
-          <div style={{ fontSize: 12, fontFamily: "'IBM Plex Mono', monospace", color: totalPct === 100 ? "#5FA777" : "#C1594B", marginBottom: 10 }}>
-            Total allocated: {totalPct}% {totalPct !== 100 && "— adjust to sum to 100%"}
+          <div style={styles.sectionTitleRow} onClick={() => toggleCollapse("allocation")}>
+            <CollapseChevron collapsed={collapsed.allocation} />
+            <h2 style={{ ...styles.cardTitle, margin: 0 }}>04 · The Allocation</h2>
           </div>
 
-          {Object.keys(alloc).map((k) => (
-            <AllocRow
-              key={k}
-              label={ASSET_META[k].label}
-              color={ASSET_META[k].color}
-              pct={alloc[k].pct}
-              returnRate={alloc[k].returnRate}
-              onPct={(v) => updateAlloc(k, "pct", v)}
-              onReturn={(v) => updateAlloc(k, "returnRate", v)}
-            />
-          ))}
+          {!collapsed.allocation && (
+            <>
+              <div style={{ fontSize: 12, fontFamily: "'IBM Plex Mono', monospace", color: totalPct === 100 ? "#5FA777" : "#C1594B", margin: "12px 0 10px" }}>
+                Total allocated: {totalPct}% {totalPct !== 100 && "— adjust to sum to 100%"}
+              </div>
+
+              {Object.keys(alloc).map((k) => (
+                <AllocRow
+                  key={k}
+                  label={ASSET_META[k].label}
+                  color={ASSET_META[k].color}
+                  pct={alloc[k].pct}
+                  returnRate={alloc[k].returnRate}
+                  onPct={(v) => updateAlloc(k, "pct", v)}
+                  onReturn={(v) => updateAlloc(k, "returnRate", v)}
+                />
+              ))}
+            </>
+          )}
         </section>
 
         {/* RIGHT: outputs */}
@@ -427,9 +495,9 @@ export default function RetirementPlanner() {
             />
           </div>
 
-          <div style={styles.card}>
+          <div style={styles.stickyCard}>
             <h2 style={styles.cardTitle}>05 · Corpus Over Time</h2>
-            <ResponsiveContainer width="100%" height={300}>
+            <ResponsiveContainer width="100%" height={280}>
               <AreaChart data={rows} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="corpusFill" x1="0" y1="0" x2="0" y2="1">
@@ -448,94 +516,102 @@ export default function RetirementPlanner() {
                 <Area type="monotone" dataKey="corpus" stroke="#C79A45" strokeWidth={2} fill="url(#corpusFill)" />
               </AreaChart>
             </ResponsiveContainer>
-            {depletionYear && (
-              <p style={styles.warning}>
-                ⚠ At this allocation and withdrawal rate, the corpus is projected to deplete in year {depletionYear}.
-                Consider a lower withdrawal rate, higher equity allocation, or reduced expenses.
-              </p>
-            )}
           </div>
+          {depletionYear && (
+            <p style={{ ...styles.warning, marginTop: -8 }}>
+              ⚠ At this allocation and withdrawal rate, the corpus is projected to deplete in year {depletionYear}.
+              Consider a lower withdrawal rate, higher equity allocation, or reduced expenses.
+            </p>
+          )}
 
           <div style={styles.card}>
             <div style={styles.expenseHeaderRow}>
-              <h2 style={{ ...styles.cardTitle, margin: 0 }}>06 · Budget vs Actual Spend</h2>
+              <div style={styles.sectionTitleRow} onClick={() => toggleCollapse("budgetVsActual")}>
+                <CollapseChevron collapsed={collapsed.budgetVsActual} />
+                <h2 style={{ ...styles.cardTitle, margin: 0 }}>06 · Budget vs Actual Spend</h2>
+              </div>
               <select
                 value={selectedMonth}
                 onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                onClick={(e) => e.stopPropagation()}
                 style={styles.monthSelect}
               >
                 {MONTHS.map((m, i) => <option key={m} value={i}>{m}</option>)}
               </select>
             </div>
 
-            <button onClick={() => copyBudgetAsActual(selectedMonth)} style={styles.addExpenseBtn}>
-              Copy budget as actual for {MONTHS[selectedMonth]}
-            </button>
+            {!collapsed.budgetVsActual && (
+              <>
+                <button onClick={() => copyBudgetAsActual(selectedMonth)} style={styles.addExpenseBtn}>
+                  Copy budget as actual for {MONTHS[selectedMonth]}
+                </button>
 
-            <table style={{ ...styles.table, marginTop: 14 }}>
-              <thead>
-                <tr>
-                  <th style={styles.th}>Category</th>
-                  <th style={styles.th}>Budget</th>
-                  <th style={styles.th}>Actual</th>
-                  <th style={styles.th}>Variance</th>
-                </tr>
-              </thead>
-              <tbody>
-                {budgetVsActualRows.map((r) => (
-                  <tr key={r.id}>
-                    <td style={styles.td}>{r.label}</td>
-                    <td style={styles.td}>{inr(r.budget)}</td>
-                    <td style={styles.td}>
-                      <input
-                        type="number"
-                        value={getActual(selectedMonth, r.id)}
-                        onChange={(e) => updateActual(selectedMonth, r.id, e.target.value)}
-                        placeholder="0"
-                        style={styles.actualInput}
-                      />
-                    </td>
-                    <td style={{ ...styles.td, color: r.variance > 0 ? "#C1594B" : r.variance < 0 ? "#5FA777" : "#7C93A6" }}>
-                      {r.variance > 0 ? "+" : ""}{inr(r.variance)}
-                    </td>
-                  </tr>
-                ))}
-                <tr>
-                  <td style={{ ...styles.td, fontWeight: 600, borderTop: "1px solid #2a3548" }}>Total</td>
-                  <td style={{ ...styles.td, fontWeight: 600, borderTop: "1px solid #2a3548" }}>{inr(monthTotalBudget)}</td>
-                  <td style={{ ...styles.td, fontWeight: 600, borderTop: "1px solid #2a3548" }}>{inr(monthTotalActual)}</td>
-                  <td style={{ ...styles.td, fontWeight: 600, borderTop: "1px solid #2a3548", color: monthTotalVariance > 0 ? "#C1594B" : monthTotalVariance < 0 ? "#5FA777" : "#7C93A6" }}>
-                    {monthTotalVariance > 0 ? "+" : ""}{inr(monthTotalVariance)}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+                <table style={{ ...styles.table, marginTop: 14 }}>
+                  <thead>
+                    <tr>
+                      <th style={styles.th}>Category</th>
+                      <th style={styles.th}>Budget</th>
+                      <th style={styles.th}>Actual</th>
+                      <th style={styles.th}>Variance</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {budgetVsActualRows.map((r) => (
+                      <tr key={r.id}>
+                        <td style={styles.td}>{r.label}</td>
+                        <td style={styles.td}>{inr(r.budget)}</td>
+                        <td style={styles.td}>
+                          <input
+                            type="number"
+                            value={getActual(selectedMonth, r.id)}
+                            onChange={(e) => updateActual(selectedMonth, r.id, e.target.value)}
+                            placeholder="0"
+                            style={styles.actualInput}
+                          />
+                        </td>
+                        <td style={{ ...styles.td, color: r.variance > 0 ? "#C1594B" : r.variance < 0 ? "#5FA777" : "#7C93A6" }}>
+                          {r.variance > 0 ? "+" : ""}{inr(r.variance)}
+                        </td>
+                      </tr>
+                    ))}
+                    <tr>
+                      <td style={{ ...styles.td, fontWeight: 600, borderTop: "1px solid #2a3548" }}>Total</td>
+                      <td style={{ ...styles.td, fontWeight: 600, borderTop: "1px solid #2a3548" }}>{inr(monthTotalBudget)}</td>
+                      <td style={{ ...styles.td, fontWeight: 600, borderTop: "1px solid #2a3548" }}>{inr(monthTotalActual)}</td>
+                      <td style={{ ...styles.td, fontWeight: 600, borderTop: "1px solid #2a3548", color: monthTotalVariance > 0 ? "#C1594B" : monthTotalVariance < 0 ? "#5FA777" : "#7C93A6" }}>
+                        {monthTotalVariance > 0 ? "+" : ""}{inr(monthTotalVariance)}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
 
-            <ResponsiveContainer width="100%" height={200} style={{ marginTop: 18 }}>
-              <BarChart data={budgetVsActualRows} margin={{ left: 0, right: 10 }}>
-                <CartesianGrid strokeDasharray="2 4" stroke="#2a3548" vertical={false} />
-                <XAxis dataKey="label" stroke="#7C93A6" fontSize={9} tickLine={false} interval={0} angle={-20} textAnchor="end" height={60} />
-                <YAxis stroke="#7C93A6" fontSize={10} tickFormatter={(v) => inr(v)} width={60} tickLine={false} />
-                <Tooltip contentStyle={{ background: "#1B2333", border: "1px solid #3a4557", borderRadius: 6, fontSize: 12 }} formatter={(v) => inr(v)} />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
-                <Bar dataKey="budget" name="Budget" fill="#7C93A6" radius={[3, 3, 0, 0]} />
-                <Bar dataKey="actual" name="Actual" fill="#C79A45" radius={[3, 3, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+                <ResponsiveContainer width="100%" height={200} style={{ marginTop: 18 }}>
+                  <BarChart data={budgetVsActualRows} margin={{ left: 0, right: 10 }}>
+                    <CartesianGrid strokeDasharray="2 4" stroke="#2a3548" vertical={false} />
+                    <XAxis dataKey="label" stroke="#7C93A6" fontSize={9} tickLine={false} interval={0} angle={-20} textAnchor="end" height={60} />
+                    <YAxis stroke="#7C93A6" fontSize={10} tickFormatter={(v) => inr(v)} width={60} tickLine={false} />
+                    <Tooltip contentStyle={{ background: "#1B2333", border: "1px solid #3a4557", borderRadius: 6, fontSize: 12 }} formatter={(v) => inr(v)} />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Bar dataKey="budget" name="Budget" fill="#7C93A6" radius={[3, 3, 0, 0]} />
+                    <Bar dataKey="actual" name="Actual" fill="#C79A45" radius={[3, 3, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
 
-            <h3 style={styles.subCardTitle}>Year trend — total budget vs total actual</h3>
-            <ResponsiveContainer width="100%" height={180}>
-              <LineChart data={trendData} margin={{ left: 0, right: 10 }}>
-                <CartesianGrid strokeDasharray="2 4" stroke="#2a3548" vertical={false} />
-                <XAxis dataKey="month" stroke="#7C93A6" fontSize={10} tickLine={false} />
-                <YAxis stroke="#7C93A6" fontSize={10} tickFormatter={(v) => inr(v)} width={60} tickLine={false} />
-                <Tooltip contentStyle={{ background: "#1B2333", border: "1px solid #3a4557", borderRadius: 6, fontSize: 12 }} formatter={(v) => (v === null ? "No data" : inr(v))} />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
-                <Line type="monotone" dataKey="budget" name="Budget" stroke="#7C93A6" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="actual" name="Actual" stroke="#C79A45" strokeWidth={2} connectNulls={false} dot={{ r: 3 }} />
-              </LineChart>
-            </ResponsiveContainer>
-            <p style={styles.footnote}>Months with no actuals entered show a gap in the "Actual" line rather than zero.</p>
+                <h3 style={styles.subCardTitle}>Year trend — total budget vs total actual</h3>
+                <ResponsiveContainer width="100%" height={180}>
+                  <LineChart data={trendData} margin={{ left: 0, right: 10 }}>
+                    <CartesianGrid strokeDasharray="2 4" stroke="#2a3548" vertical={false} />
+                    <XAxis dataKey="month" stroke="#7C93A6" fontSize={10} tickLine={false} />
+                    <YAxis stroke="#7C93A6" fontSize={10} tickFormatter={(v) => inr(v)} width={60} tickLine={false} />
+                    <Tooltip contentStyle={{ background: "#1B2333", border: "1px solid #3a4557", borderRadius: 6, fontSize: 12 }} formatter={(v) => (v === null ? "No data" : inr(v))} />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Line type="monotone" dataKey="budget" name="Budget" stroke="#7C93A6" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="actual" name="Actual" stroke="#C79A45" strokeWidth={2} connectNulls={false} dot={{ r: 3 }} />
+                  </LineChart>
+                </ResponsiveContainer>
+                <p style={styles.footnote}>Months with no actuals entered show a gap in the "Actual" line rather than zero.</p>
+              </>
+            )}
           </div>
 
           <div style={styles.twoCol}>
@@ -598,6 +674,17 @@ export default function RetirementPlanner() {
         </section>
       </div>
     </div>
+  );
+}
+
+function CollapseChevron({ collapsed }) {
+  return (
+    <svg
+      width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#C79A45" strokeWidth="2.5"
+      style={{ transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)", transition: "transform 0.15s ease", flexShrink: 0 }}
+    >
+      <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
 
@@ -671,8 +758,11 @@ const styles = {
   title: { fontFamily: "'Source Serif 4', serif", fontSize: 34, fontWeight: 600, margin: "0 0 8px", letterSpacing: "-0.01em" },
   subtitle: { color: "#9FB0C7", fontSize: 15, maxWidth: 620, lineHeight: 1.5, margin: 0 },
   downloadBtn: { display: "inline-flex", alignItems: "center", marginTop: 18, background: "#C79A45", color: "#12203a", border: "none", borderRadius: 6, padding: "10px 18px", fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, fontWeight: 600, letterSpacing: "0.02em", cursor: "pointer" },
+  resetBtn: { display: "inline-flex", alignItems: "center", marginTop: 18, marginLeft: 12, background: "transparent", color: "#7C93A6", border: "1px solid #3a4557", borderRadius: 6, padding: "10px 18px", fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, fontWeight: 600, letterSpacing: "0.02em", cursor: "pointer" },
   grid: { maxWidth: 1100, margin: "0 auto", display: "grid", gridTemplateColumns: "340px 1fr", gap: 20, alignItems: "start" },
   card: { background: "#182338", border: "1px solid #2a3548", borderRadius: 10, padding: "18px 20px", marginBottom: 20 },
+  stickyCard: { background: "#182338", border: "1px solid #2a3548", borderRadius: 10, padding: "18px 20px", marginBottom: 20, position: "sticky", top: 12, zIndex: 30, boxShadow: "0 8px 24px rgba(0,0,0,0.35)" },
+  sectionTitleRow: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none" },
   cardTitle: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, letterSpacing: "0.04em", color: "#C79A45", margin: "0 0 16px", textTransform: "uppercase" },
   divider: { height: 1, background: "#2a3548", margin: "20px 0" },
   field: { marginBottom: 18 },
